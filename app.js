@@ -128,14 +128,33 @@ function verifyTransaction(trans) {
     let Outputs = transaction.Outputs;
     
     let flag = 1;
+    // Checks if the same unused output is not used twice
+    let temp = {};
     for (let i = 0; i < numInputs; i++) {
         let tup = [Inputs[i].transactionID, Inputs[i].index];
-        if (tup in unusedOutputs) continue;
-        else {
+        if (tup in temp) {
             flag = 0;
-            break;           
+            break;
+        }
+        else {
+            temp[tup] = 1;
         }
     }
+    // Checks if all the inputs are present in unused outputs or not.
+    if (flag) {
+        for (let i = 0; i < numInputs; i++) {
+            let tup = [Inputs[i].transactionID, Inputs[i].index];
+            if (tup in unusedOutputs) continue;
+            else {
+                flag = 0;
+                break;           
+            }
+        }
+    }
+    else {
+        return false;
+    }
+    // Checks if the amount of coins used is less than amount of coins obtained.
     if (flag) {
         let coinsUsed = 0;
         let coinsHave = 0;
@@ -151,6 +170,7 @@ function verifyTransaction(trans) {
     else {
         return false;
     }
+    // Verifies Signatures
     if (flag) {
         let message = createHash(numOutputs, Outputs);
         for (let i = 0; i < numInputs; i++) {
@@ -168,6 +188,7 @@ function verifyTransaction(trans) {
     else {
         return false;
     }
+
     return true;
 }
 
