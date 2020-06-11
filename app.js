@@ -1,13 +1,21 @@
+const express = require ('express');
+const bodyParser = require ('body-parser');
 const crypto = require('crypto');
 const readline = require ('readline');
 const fs = require ('fs');
-const Transaction = require ("classes/Transaction");
-const Input = require ("classes/Input");
-const Output = require ("classes/Output");
+const Transaction = require ("./classes/Transaction");
+const Input = require ("./classes/Input");
+const Output = require ("./classes/Output");
+
+const app = express();
+
+app.use (bodyParser.urlencoded({extended : true}));
+app.use (bodyParser.json());
 
 let unusedOutputs = {};
+let pendingTransactions = [];
 
-const rl = readline.createInterface({
+/*const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
@@ -18,7 +26,7 @@ rl.question ("Enter the path of the transaction to be verified", str => {
     if (ver === true) console.log ("Verified!");
     else console.log ("Verification Failed");
     rl.close();
-})
+})*/
 
 function getInt(str, start, end)
 {
@@ -82,35 +90,30 @@ function getDetails (str) {
         Outputs.push(Out);
     }
 
-    let obj = {
-        numInputs : numInputs,
-        Inputs : Inputs,
-        numOutputs : numOutputs,
-        Outputs : Outputs
-    };
+    let obj = new Transaction(numInputs, Inputs, numOutputs, Outputs);
 
     return obj;
 }
 
 function createHash (numOutputs, Outputs) {
     let data = [];
-    let out = transaction.numOutputs;
+    let out = numOutputs;
     let temp = [];
     temp = new Uint8Array(temp.concat(toBytesInt32(out))[0]);
     temp = [...temp];
     data = data.concat(temp);
-    for (let i = 0; i < transaction.numOutputs; i++){
+    for (let i = 0; i < numOutputs; i++){
         let arr = [];
-        let num1 = transaction.Outputs[i].coins;
+        let num1 = Outputs[i].coins;
         arr = new Uint8Array(arr.concat(toBytesInt64(num1)));
         arr = [...arr];
         data = data.concat(arr);
-        let num2 = transaction.Outputs[i].pubkey_len;
+        let num2 = Outputs[i].pubkey_len;
         arr = [];
         arr = new Uint8Array(arr.concat(toBytesInt32(num2))[0]);
         arr = [...arr];
         data = data.concat(arr);
-        let str = transaction.Outputs[i].pubkey;
+        let str = Outputs[i].pubkey;
         arr = [];
         arr = new Uint8Array(Buffer.from(str, 'utf-8'));
         arr = [...arr];
@@ -192,3 +195,29 @@ function verifyTransaction(trans) {
     return true;
 }
 
+app.get ('/getBlock/:number', function(req, res) {
+    const n = req.params.number;
+    const data = fs.readFileSync(n + ".dat");
+    res.set ('Content-Type', 'application/octet-stream') // Not required as express already sets the header to octet-stream when parameter is a buffer object.
+    res.send(data);
+});
+
+app.get ('/getPendingTransactions', function (req, res) {
+    const data = [];
+    pendingTransactions.forEach(function (transaction) {
+        let inputs = transaction.Inputs;
+        let outputs = transaction.Outputs;
+        
+        let temp = {};
+        temp["inputs"] = inputs;
+        temp["outputs"] = outputs;
+
+        data.push(temp);
+    })
+    res.set ('Content-Type', 'application/json');
+    res.send (data);
+});
+
+app.listen (3000, function() {
+    console.log("Server started on port 3000");
+})
