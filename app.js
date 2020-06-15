@@ -3,6 +3,7 @@ const bodyParser = require ('body-parser');
 const crypto = require('crypto');
 const readline = require ('readline');
 const fs = require ('fs');
+const getRawBody = require('raw-body');
 const Transaction = require ("./classes/Transaction");
 const Input = require ("./classes/Input");
 const Output = require ("./classes/Output");
@@ -14,6 +15,8 @@ app.use (bodyParser.json());
 
 let unusedOutputs = {};
 let pendingTransactions = [];
+let peers = [];
+let numBlocks = 0;
 
 /*const rl = readline.createInterface({
     input: process.stdin,
@@ -195,6 +198,24 @@ function verifyTransaction(trans) {
     return true;
 }
 
+app.use(function (req, res, next) {
+    if (req.headers['content-type'] === 'application/octet-stream') {
+        getRawBody(req, {
+            length: req.headers['content-length'],
+            encoding: req.charset
+        }, function (err, string) {
+            if (err)
+                return next(err);
+
+            req.body = string;
+            next();
+         })
+    }
+    else {
+        next();
+    }
+});
+
 app.get ('/getBlock/:number', function(req, res) {
     const n = req.params.number;
     const data = fs.readFileSync(n + ".dat");
@@ -217,6 +238,42 @@ app.get ('/getPendingTransactions', function (req, res) {
     res.set ('Content-Type', 'application/json');
     res.send (data);
 });
+
+app.post ('/newPeer', function(req, res) {
+    const url = req.body.url;
+    peers.push(url);
+    console.log("New peer added!", peers);
+    res.send("Peer added");
+});
+
+app.get ('/getPeers', function(req, res) {
+    let data = {};
+    data["peers"] = peers;
+    console.log(data);
+    res.json (data);
+});
+
+app.post ('/newBlock', function(req, res) {
+    const data = req.body;
+    //console.log(data);
+    numBlocks++;
+    fs.writeFileSync('Blocks/' + numBlocks + '.dat', data);
+    console.log("New Block Added Successfully!");
+    res.send("Block Added");
+});
+
+app.post ('/newTransaction', function(req, res) {
+    let inputs = req.body.inputs;
+    let numInputs = inputs.length;
+    let outputs = req.body.outputs;
+    let numOutputs = outputs.length;
+    let transaction = new Transaction (numInputs, inputs, numOutputs, outputs);
+
+    pendingTransactions.push(transaction);
+    console.log(inputs[0]);
+    console.log("Transaction added successfully!");
+    res.send("Transaction added");
+})
 
 app.listen (3000, function() {
     console.log("Server started on port 3000");
