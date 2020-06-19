@@ -1,21 +1,25 @@
 const express = require ('express');
 const bodyParser = require ('body-parser');
 const crypto = require('crypto');
-const readline = require ('readline');
 const fs = require ('fs');
 const getRawBody = require('raw-body');
-const Transaction = require ("./classes/Transaction");
-const Input = require ("./classes/Input");
-const Output = require ("./classes/Output");
+const Transaction = require ("../classes/Transaction");
+const Input = require ("../classes/Input");
+const Output = require ("../classes/Output");
+const axios = require('axios');
 
 const app = express();
 
 app.use (bodyParser.urlencoded({extended : true}));
 app.use (bodyParser.json());
 
+const myUrl = "";
+
 let unusedOutputs = {};
+let allUrls = ["http://e8516e86ec21.ngrok.io"];
 let pendingTransactions = [];
 let peers = [];
+let potentialPeers = [];
 let numBlocks = 0;
 
 /*const rl = readline.createInterface({
@@ -30,6 +34,15 @@ rl.question ("Enter the path of the transaction to be verified", str => {
     else console.log ("Verification Failed");
     rl.close();
 })*/
+
+function removeElement(array, elem) {
+    var index = array.indexOf(elem);
+    if (index > -1) {
+        array.splice(index, 1);
+    }
+}
+
+// Functions for validation of transactions and conversion of binary data to readable strings and numbers.
 
 function getInt(str, start, end)
 {
@@ -198,6 +211,120 @@ function verifyTransaction(trans) {
     return true;
 }
 
+// Functions for initialisation of a node and processing of block. 
+
+function getPeers (url) {
+    axios.post (url + '/newPeer', { 
+        key : "url", value : myUrl}, { headers : {key : myUrl}, params : { key : myUrl}}) 
+        .then((res) => {
+            if (res.status === 200) {
+                peers.push(url);
+                console.log(peers);
+            }
+            else if (res.status === 500) {
+                axios.get (url + '/getPeers')
+                    .then((res) => {
+                        let data = res.peers;
+                        data.forEach(function (peer) {
+                            potentialPeers.push(peer);
+                        }) 
+                    })
+            }
+        })
+        .catch((err) => {
+            console.log(err);
+        })
+}
+
+async function saveBlock (blockNum, link) {
+    const url = link + "/getBlock/" + blockNum;
+
+    axios.get (url, 
+        {
+            responseType : 'stream',
+        })
+        .then ((response) => {
+            const data = response.data;
+            fs.writeFileSync("/Blocks/" + blockNum + ".dat", data);
+            console.log("successful");
+            blockNum++;
+            saveBlock(blockNum, link);
+            return true;
+        })
+        .catch ((err) => {
+            console.log("Unsuccessful");
+            return false;
+        })
+}
+
+function processBlock (block) {
+    let str = block;
+    let cur = 116;
+    let numtransactions = getInt (str, cur, cur+4);
+    cur += 4;
+    for (let i = 0; i < numtransactions; i++) {
+        let size = getInt(str, cur, cur+4);
+        cur += 4;
+        let trans = getDetails(str.toString("hex", cur, cur + size));
+        cur += size;
+        removeElement(pendingTransactions, trans);
+        let numInputs = trans.numInputs;
+        for (let j = 0; j < numInputs; j++) {
+            let input = trans.Inputs[j];
+            removeElement (unusedOutputs, input);
+        }
+        let numOutputs = trans.numOutputs;
+        for (let k = 0; k < numOutputs; k++) {
+            let output = trans.Outputs[k];
+            unusedOutputs.push(output);
+        }
+    }
+}
+
+async function initialiseNode () {
+    const limit = 4;
+    allUrls.forEach(async function (url) {
+        if (peers.length <= limit/2) {
+            await getPeers(url);
+        }
+    })
+    setTimeout ( function () {
+        getBlocks();
+    }, 5000);
+}
+
+function getBlocks() {
+    if (peers.length !== 0) {
+        let peer = peers[0];
+        console.log("Peer found");
+        let blockNum = 1;
+        saveBlock(blockNum, peer);
+        pendingtrans(peer);
+    }
+    else {
+        console.log("Found no peer!");
+        return;
+    }
+}
+
+function pendingtrans(peer) {
+    axios.get (peer + '/getPendingTransactions')
+    .then((res) => {
+        let data = res.data;
+        data.forEach (function (trans) {
+            let Inputs = trans.inputs;
+            let numInputs = Inputs.length;
+            let Outputs = trans.outputs;
+            let numOutputs = Outputs.length;
+            let transaction = new Transaction(numInputs, Inputs, numOutputs, Ouputs);
+            pendingTransactions.push(transaction);
+        })
+        console.log(pendingTransactions);
+    })
+}
+
+// Functions for handling of various routes on the server.
+
 app.use(function (req, res, next) {
     if (req.headers['content-type'] === 'application/octet-stream') {
         getRawBody(req, {
@@ -218,13 +345,24 @@ app.use(function (req, res, next) {
 
 app.get ('/getBlock/:number', function(req, res) {
     const n = req.params.number;
-    const data = fs.readFileSync(n + ".dat");
-    res.set ('Content-Type', 'application/octet-stream') // Not required as express already sets the header to octet-stream when parameter is a buffer object.
-    res.send(data);
+    const path = "Blocks/" + n + ".dat";
+    try {
+        if (fs.existsSync(path)) {
+            const data = fs.readFileSync("Blocks/" + n + ".dat");
+            res.set ('Content-Type', 'application/octet-stream') // Not required as express already sets the header to octet-stream when parameter is a buffer object.
+            res.status(200).send(data);
+        }
+        else {
+            res.send(400).send("Error");
+        }
+    }
+    catch (err) {
+        console.log(err.message);
+    }
 });
 
 app.get ('/getPendingTransactions', function (req, res) {
-    const data = [];
+    let data = [];
     pendingTransactions.forEach(function (transaction) {
         let inputs = transaction.Inputs;
         let outputs = transaction.Outputs;
@@ -241,9 +379,15 @@ app.get ('/getPendingTransactions', function (req, res) {
 
 app.post ('/newPeer', function(req, res) {
     const url = req.body.url;
-    peers.push(url);
-    console.log("New peer added!", peers);
-    res.send("Peer added");
+    const limit = 4;
+    if (peers.length < limit) {
+        peers.push(url);
+        console.log("New peer added!", peers);
+        res.sendStatus(200);
+    }
+    else {
+        res.sendStatus(500);
+    }
 });
 
 app.get ('/getPeers', function(req, res) {
@@ -255,6 +399,7 @@ app.get ('/getPeers', function(req, res) {
 
 app.post ('/newBlock', function(req, res) {
     const data = req.body;
+    console.log("Block received");
     //console.log(data);
     numBlocks++;
     fs.writeFileSync('Blocks/' + numBlocks + '.dat', data);
