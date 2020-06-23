@@ -7,6 +7,7 @@ const Transaction = require ("../classes/Transaction");
 const Input = require ("../classes/Input");
 const Output = require ("../classes/Output");
 const axios = require('axios');
+const _ = require('lodash');
 
 const app = express();
 
@@ -35,14 +36,15 @@ rl.question ("Enter the path of the transaction to be verified", str => {
     rl.close();
 })*/
 
-function removeElement(array, elem) {
-    var index = array.indexOf(elem);
-    if (index > -1) {
-        array.splice(index, 1);
-    }
+/*************************** Util Functions ***********************/ 
+
+function removeTransaction(array, elem) {
+    _.remove(array, function(e) {
+        return _.isEqual(e, elem);
+    })
 }
 
-// Functions for validation of transactions and conversion of binary data to readable strings and numbers.
+/******* Functions for validation of transactions and conversion of binary data to readable strings and numbers.******/
 
 function getInt(str, start, end)
 {
@@ -211,7 +213,7 @@ function verifyTransaction(trans) {
     return true;
 }
 
-// Functions for initialisation of a node and processing of block. 
+/********** Functions for initialisation of a node and processing of block. ************/
 
 function getPeers (url) {
     axios.post (url + '/newPeer', { 
@@ -267,11 +269,14 @@ function processBlock (block) {
         cur += 4;
         let trans = getDetails(str.toString("hex", cur, cur + size));
         cur += size;
-        removeElement(pendingTransactions, trans);
+        removeTransaction(pendingTransactions, trans);
         let numInputs = trans.numInputs;
         for (let j = 0; j < numInputs; j++) {
             let input = trans.Inputs[j];
-            removeElement (unusedOutputs, input);
+            let tup = [input.transactionID, input.index];
+            if (tup in unusedOutputs){
+                delete unusedOutputs[tup];
+            }
         }
         let numOutputs = trans.numOutputs;
         for (let k = 0; k < numOutputs; k++) {
@@ -323,7 +328,7 @@ function pendingtrans(peer) {
     })
 }
 
-// Functions for handling of various routes on the server.
+/************** Functions for handling of various routes on the server. *************/
 
 app.use(function (req, res, next) {
     if (req.headers['content-type'] === 'application/octet-stream') {
