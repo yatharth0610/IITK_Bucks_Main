@@ -44,6 +44,12 @@ function removeTransaction(array, elem) {
     })
 }
 
+function getBlockHash(num) {
+    let block = fs.readFileSync('Blocks/' + num + '.dat');
+    let hash = crypto.createHash("sha256").update(block.substring(0, 116)).digest('hex');
+    return hash;
+}
+
 /******* Functions for validation of transactions and conversion of binary data to readable strings and numbers.******/
 
 function getInt(str, start, end)
@@ -213,7 +219,7 @@ function verifyTransaction(trans) {
     return true;
 }
 
-/********** Functions for initialisation of a node and processing of block. ************/
+/********** Functions for initialisation of a node and processing/verification of block. ************/
 
 function getPeers (url) {
     axios.post (url + '/newPeer', { 
@@ -247,9 +253,12 @@ async function saveBlock (blockNum, link) {
         })
         .then ((response) => {
             const data = response.data;
-            fs.writeFileSync("/Blocks/" + blockNum + ".dat", data);
-            console.log("successful");
-            blockNum++;
+            if (verifyBlock(data) === true) { 
+                fs.writeFileSync("/Blocks/" + blockNum + ".dat", data);
+                console.log("successful");
+                blockNum++;
+            }
+            else console.log("Invalid Block!");
             saveBlock(blockNum, link);
             return true;
         })
@@ -264,14 +273,14 @@ function processBlock (block) {
     let cur = 116;
     let numtransactions = getInt (str, cur, cur+4);
     cur += 4;
-    for (let i = 0; i < numtransactions; i++) {
+    for (let i = 1; i < numtransactions; i++) {
         let size = getInt(str, cur, cur+4);
         cur += 4;
         let trans = getDetails(str.toString("hex", cur, cur + size));
         cur += size;
         removeTransaction(pendingTransactions, trans);
         let numInputs = trans.numInputs;
-        for (let j = 0; j < numInputs; j++) {
+        for (let j = 1; j < numInputs; j++) {
             let input = trans.Inputs[j];
             let tup = [input.transactionID, input.index];
             if (tup in unusedOutputs){
@@ -282,6 +291,63 @@ function processBlock (block) {
         for (let k = 0; k < numOutputs; k++) {
             let output = trans.Outputs[k];
             unusedOutputs.push(output);
+        }
+    }
+}
+
+function verifyBlock (block) {
+    let header = block.substring(0,116);
+    let index = getInt(block, 0, 4);
+    if (index !== 1) {
+        let cur = 116;
+        let numtransactions = getInt (block, cur, cur+4);
+        cur += 4;
+        for (let i = 1; i < numtransactions; i++) {
+            let size = getInt(block, cur, cur+4);
+            cur += 4;
+            let trans = block.substring(cur, cur+size);
+            cur += size;
+            if (verifyTransaction(trans) === false) {
+                    return false;
+            }
+        }
+    }
+    let hashed = crypto.createHash('sha256').update(block.substring(116)).digest('hex');
+    if (verifyHeader(header, hashed)) return true;
+}
+
+function verifyHeader (header, hash) {
+    let cur = 0;
+    let index = getInt(header, cur, cur + 4);
+    cur += 4;
+    let parentHash = header.toString("hex", cur, cur + 32);
+    cur += 32;
+    let bodyHash = header.toString("hex", cur, cur + 32);
+    cur += 32;
+    let target = header.toString("hex", cur, cur + 32);
+    cur += 32;
+    let timestamp = getInt (header, cur, cur + 8);
+    cur += 8;
+    let nonce = getInt (header, cur, cur + 8);
+    if (bodyHash !== hash) return false;
+    else {
+        if (index === 1) {
+            if (parentHash !== '0'.repeat(64)) return false;
+            else if (target !== '0'.repeat(7) + 'f' + '0'.repeat(56)) return false;
+            else {
+                let hashed = crypto.createHash('sha256').update(header).digest('hex');
+                if (hashed >= target) return false;
+            }
+            return true;
+        }
+        else {
+            const parent_hash = getBlockHash(index-1);
+            if (parentHash !== parent_hash) return false;
+            else {
+                const hashed = crypto.createHash('sha256').update(header).digest('hex');
+                if (hashed >= target) return false;
+            }
+            return true;
         }
     }
 }
@@ -406,10 +472,16 @@ app.post ('/newBlock', function(req, res) {
     const data = req.body;
     console.log("Block received");
     //console.log(data);
-    numBlocks++;
-    fs.writeFileSync('Blocks/' + numBlocks + '.dat', data);
-    console.log("New Block Added Successfully!");
-    res.send("Block Added");
+    if (verifyBlock(data) === true) {
+        numBlocks++;
+        fs.writeFileSync('Blocks/' + numBlocks + '.dat', data);
+        console.log("New Block Added Successfully!");
+        res.send("Block Added");
+    }
+    else {
+        console.log("Block Verification Failed!");
+        res.send("Verfication Failed!");
+    }
 });
 
 app.post ('/newTransaction', function(req, res) {
