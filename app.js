@@ -3,11 +3,13 @@ const bodyParser = require ('body-parser');
 const crypto = require('crypto');
 const fs = require ('fs');
 const getRawBody = require('raw-body');
-const Transaction = require ("../classes/Transaction");
-const Input = require ("../classes/Input");
-const Output = require ("../classes/Output");
+const Transaction = require ("./classes/Transaction");
+const Input = require ("./classes/Input");
+const Output = require ("./classes/Output");
+const blocKHeader = require("./classes/Block_Header");
 const axios = require('axios');
 const _ = require('lodash');
+const { Worker } = require('worker_threads');
 
 const app = express();
 
@@ -21,20 +23,9 @@ let allUrls = ["http://e8516e86ec21.ngrok.io"];
 let pendingTransactions = [];
 let peers = [];
 let potentialPeers = [];
+let tempOutputs = {};
 let numBlocks = 0;
-
-/*const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-rl.question ("Enter the path of the transaction to be verified", str => {
-    trans = fs.readFileSync(str);
-    let ver = verifyTransaction(trans);
-    if (ver === true) console.log ("Verified!");
-    else console.log ("Verification Failed");
-    rl.close();
-})*/
+let blockReward = 0;
 
 /*************************** Util Functions ***********************/ 
 
@@ -46,11 +37,9 @@ function removeTransaction(array, elem) {
 
 function getBlockHash(num) {
     let block = fs.readFileSync('Blocks/' + num + '.dat');
-    let hash = crypto.createHash("sha256").update(block.substring(0, 116)).digest('hex');
+    let hash = crypto.createHash("sha256").update(Buffer.from(block.slice(0, 116))).digest('hex');
     return hash;
 }
-
-/******* Functions for validation of transactions and conversion of binary data to readable strings and numbers.******/
 
 function getInt(str, start, end)
 {
@@ -78,6 +67,22 @@ function getInt(str, start, end)
     }
 }
 
+function toBytesInt32 (num) {
+    arr = new ArrayBuffer(4); 
+    view = new DataView(arr);
+    view.setUint32(0, num, false); 
+    return arr;
+}
+
+function toBytesInt64 (num){
+    let arr = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) {
+        arr[7-i] = parseInt(num%256n);
+        num = num/256n;
+    }
+    return arr;
+}
+
 function getDetails (str) {
     
     let Inputs = [];
@@ -88,13 +93,13 @@ function getDetails (str) {
     curr = curr + 4;
 
     for (let i = 0; i < numInputs; i++) {
-        let transactionID = str.toString("hex", curr, curr+32);
+        let transactionID = (Buffer.from(str)).toString("hex", curr, curr+32);
         curr += 32;
         let index = getInt(str, curr, curr+4);
         curr += 4;
         let sign_length = getInt(str, curr, curr+4);
         curr += 4;
-        let signature = str.toString("hex", curr, curr + sign_length);
+        let signature = (Buffer.from(str)).toString("hex", curr, curr + sign_length);
         curr += sign_length;
         let In = new Input(transactionID, index, sign_length, signature);
         Inputs.push(In);
@@ -108,7 +113,7 @@ function getDetails (str) {
         curr += 8;
         let pubkey_len = getInt(str, curr, curr+4);
         curr += 4;
-        let pub_key = str.toString("utf-8", curr, curr + pubkey_len);
+        let pub_key = (Buffer.from(str)).toString("utf-8", curr, curr + pubkey_len);
         curr += pubkey_len;
         let Out = new Output(coins, pubkey_len, pub_key);
         Outputs.push(Out);
@@ -118,6 +123,60 @@ function getDetails (str) {
 
     return obj;
 }
+
+function transactionToByteArray (transaction) {
+    var data = [];
+    data = new Uint8Array(data.concat(toBytesInt32(transaction.numInputs))[0]);
+    data = [...data];
+    for (let i = 0; i < transaction.numInputs; i++) {
+        let temp = [];
+        let str1 = transaction.Inputs[i].transactionID;
+        temp = new Uint8Array(Buffer.from(str1, 'hex'));
+        temp = [...temp];
+        while (temp.length != 32) temp.unshift(0);
+        data = data.concat(temp);
+        let num1 = transaction.Inputs[i].index;
+        temp = [];
+        temp = new Uint8Array(temp.concat(toBytesInt32(num1))[0]);
+        temp = [...temp];
+        data = data.concat(temp);
+        let num2 = transaction.Inputs[i].sign_length;
+        temp = [];
+        temp = new Uint8Array(temp.concat(toBytesInt32(num2))[0]);
+        temp = [...temp];
+        data = data.concat(temp);
+        let str2 = transaction.Inputs[i].sign;
+        temp = [];
+        temp = new Uint8Array(Buffer.from(str2, 'hex'));
+        temp = [...temp];
+        data = data.concat(temp);
+    }
+    let out = transaction.numOutputs;
+    let temp = [];
+    temp = new Uint8Array(temp.concat(toBytesInt32(out))[0]);
+    temp = [...temp];
+    data = data.concat(temp);
+    for (let i = 0; i < transaction.numOutputs; i++){
+        let arr = [];
+        let num1 = BigInt(transaction.Outputs[i].coins);
+        arr = arr.concat([...toBytesInt64(num1)]);
+        data = data.concat(arr);
+        let num2 = transaction.Outputs[i].pubkey_len;
+        arr = [];
+        arr = new Uint8Array(arr.concat(toBytesInt32(num2))[0]);
+        arr = [...arr];
+        data = data.concat(arr);
+        let str = transaction.Outputs[i].pubkey;
+        arr = [];
+        arr = new Uint8Array(Buffer.from(str, 'utf-8'));
+        arr = [...arr];
+        data = data.concat(arr);
+    }
+    let new_data = new Uint8Array(Buffer.from(data));
+    return new_data;
+}
+
+/******* Functions for validation of transactions *********/
 
 function createHash (numOutputs, Outputs) {
     let data = [];
@@ -145,6 +204,12 @@ function createHash (numOutputs, Outputs) {
     }
     let hashed = crypto.createHash('sha256').update(Buffer.from(data)).digest('hex');
     return hashed;
+}
+
+function verifyTrans1(trans, fees) {
+    let data = getDetails(trans);
+    if (data.Ouputs[0].coins <= fees + blockReward) return true;
+    else return false;
 }
 
 function verifyTransaction(trans) {
@@ -219,6 +284,92 @@ function verifyTransaction(trans) {
     return true;
 }
 
+/********** Functions for mining of blocks **********/
+
+let worker = new Worker('./miner.js');
+
+function mineBlock(worker) {
+    let size = 116;
+    let body = [];
+    let data = [];
+    let block_data = [];
+    let cur = 0;
+    let fees = 0;
+    let index = numBlocks + 1;
+    let parent_hash = getBlockHash(numBlocks);
+    let target = "0000f" + '0'.repeat(60);
+
+    while (cur < pendingTransactions.length) {
+        let buffer = transactionToByteArray(pendingTransactions[cur]);
+        size += buffer.length;
+        console.log(buffer);
+        if (size > 1000116) break;
+        
+        if (verifyTransaction(trans) === true) {
+            let numInputs = pendingTransactions[cur].numInputs;
+            for (let i = 0; i < numInputs; i++) {
+                let tup = [pendingTransactions[cur].Inputs[i].transactionID, pendingTransactions[cur].Inputs[i].index];
+                if (tup in unusedOutputs) {
+                    tempOutputs[tup] = unusedOutputs[tup];
+                    delete unusedOutputs[tup];
+                }
+                fees += unusedOutputs[tup];
+            }
+            for (let i = 0; i < numOutputs; i++) {
+                fees -= pendingTransactions[cur].Outputs[i].coins;
+            }
+            let arr = [];
+            arr = new Uint8Array(arr.concat(toBytesInt32(buffer.length))[0]);
+            body = [...body, ...arr];
+            body = [...body, ...buffer];
+            cur++;
+        }
+    }
+    
+    // Creating the first transaction of the block
+    let output = new Output(fees + blockReward, 192, publicKey);
+    let trans1 = new Transaction(0, [], 1, output);
+    let buffer = transactionToByteArray(trans1);
+    let arr = [];
+    arr = new Uint8Array(arr.concat(toBytesInt32(buffer.length))[0]);
+    data = [...data, ...arr];
+    data = [...data, ...buffer];
+    data = [...data, ...body];
+
+    let body_hash = crypto.createHash('sha256').update(Buffer.from(data)).digest('hex');
+    let header = new blocKHeader(index, parent_hash, body_hash, target);
+    worker.postMessage({type : "mine", header : header});
+    worker.on('message', message => {
+        console.log("Message received : ", message);
+        for (let key in tempOutputs) {
+            delete tempOutputs[key];
+        }
+        block_data = [...message.header];
+        let arr = [];
+        arr = new Uint8Array(arr.concat(toBytesInt32(cur))[0]);
+        arr = [...arr];
+        block_data = block_data.concat(arr);
+        arr = data;
+        block_data = block_data.concat(arr);
+        post_new_block(block_data);
+    })
+}
+
+function post_new_block(data) {
+    numBlocks++;
+    let bin_data = new Uint8Array(Buffer.from(data));
+    processBlock(bin_data);
+    console.log("Block : ", data);
+}
+
+function stopMining(worker) {
+    worker.terminate().then(console.log("Worker Stopped"));
+    for (let key in tempOutputs) {
+        unusedOutputs[key] = tempOutputs[key];
+        delete tempOutputs[key];
+    }
+}
+
 /********** Functions for initialisation of a node and processing/verification of block. ************/
 
 function getPeers (url) {
@@ -276,11 +427,12 @@ function processBlock (block) {
     for (let i = 1; i < numtransactions; i++) {
         let size = getInt(str, cur, cur+4);
         cur += 4;
-        let trans = getDetails(str.toString("hex", cur, cur + size));
+        let transID = crypto.createHash('sha256').update(Buffer.from(str.slice(cur, cur+size))).digest('hex');
+        let trans = getDetails(str.slice(cur, cur + size));
         cur += size;
         removeTransaction(pendingTransactions, trans);
         let numInputs = trans.numInputs;
-        for (let j = 1; j < numInputs; j++) {
+        for (let j = 0; j < numInputs; j++) {
             let input = trans.Inputs[j];
             let tup = [input.transactionID, input.index];
             if (tup in unusedOutputs){
@@ -288,31 +440,52 @@ function processBlock (block) {
             }
         }
         let numOutputs = trans.numOutputs;
+        console.log(numOutputs);
         for (let k = 0; k < numOutputs; k++) {
             let output = trans.Outputs[k];
-            unusedOutputs.push(output);
+            let tup = [transID, k];
+            unusedOutputs[tup] = output;
         }
     }
+    console.log("Processing of block done!!");
 }
 
 function verifyBlock (block) {
-    let header = block.substring(0,116);
+    let header = block.slice(0,116);
     let index = getInt(block, 0, 4);
     if (index !== 1) {
+        let fees = 0;
         let cur = 116;
         let numtransactions = getInt (block, cur, cur+4);
         cur += 4;
+        let size = getInt(block, cur, cur + 4);
+        cur += 4;
+        let trans1 = block.slice(cur, cur + size);
+        cur += size;
         for (let i = 1; i < numtransactions; i++) {
             let size = getInt(block, cur, cur+4);
             cur += 4;
-            let trans = block.substring(cur, cur+size);
+            let trans = block.slice(cur, cur+size);
             cur += size;
+            let data = getDetails(trans);
+            let numInputs = data.numInputs;
+            let inputs = data.Inputs;
+            let numOutputs = data.numOutputs;
+            let outputs = data.Outputs;
+            for (let i = 0; i < numInputs; i++) {
+                let tup = [inputs[i].transactionID, inputs[i].index];
+                fees += unusedOutputs[tup].coins;
+            }
+            for (let i = 0; i < numOutputs; i++) {
+                fees -= outputs[i].coins;
+            }
             if (verifyTransaction(trans) === false) {
                     return false;
             }
         }
+        if (!verifyTrans1(trans1, fees)) return false;
     }
-    let hashed = crypto.createHash('sha256').update(block.substring(116)).digest('hex');
+    let hashed = crypto.createHash('sha256').update(Buffer.from(block.slice(116))).digest('hex');
     if (verifyHeader(header, hashed)) return true;
 }
 
@@ -473,7 +646,9 @@ app.post ('/newBlock', function(req, res) {
     console.log("Block received");
     //console.log(data);
     if (verifyBlock(data) === true) {
+        stopMining(worker);
         numBlocks++;
+        status = false;
         fs.writeFileSync('Blocks/' + numBlocks + '.dat', data);
         console.log("New Block Added Successfully!");
         res.send("Block Added");
