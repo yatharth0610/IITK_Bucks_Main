@@ -325,6 +325,11 @@ function mineBlock(worker) {
             cur++;
         }
     }
+
+    for (let key in tempOutputs) {
+        unusedOutputs[key] = tempOutputs[key];
+        delete tempOutputs[key];
+    }
     
     // Creating the first transaction of the block
     let output = new Output(fees + blockReward, 192, publicKey);
@@ -364,10 +369,6 @@ function post_new_block(data) {
 
 function stopMining(worker) {
     worker.terminate().then(console.log("Worker Stopped"));
-    for (let key in tempOutputs) {
-        unusedOutputs[key] = tempOutputs[key];
-        delete tempOutputs[key];
-    }
 }
 
 /********** Functions for initialisation of a node and processing/verification of block. ************/
