@@ -21,7 +21,7 @@ const myUrl = "";
 let unusedOutputs = {};
 let allUrls = ["http://e8516e86ec21.ngrok.io"];
 let pendingTransactions = [];
-let peers = [];
+let peers = ["http://8d6ef19df84f.ngrok.io"];
 let potentialPeers = [];
 let tempOutputs = {};
 let numBlocks = 0;
@@ -356,14 +356,30 @@ function mineBlock(worker) {
         block_data = block_data.concat(arr);
         arr = data;
         block_data = block_data.concat(arr);
-        post_new_block(block_data);
+        let bin_data = new Uint8Array(Buffer.from(block_data));
+        post_new_block(bin_data);
     })
 }
 
 function post_new_block(data) {
     numBlocks++;
-    let bin_data = new Uint8Array(Buffer.from(data));
-    processBlock(bin_data);
+    fs.writeFileSync('Blocks/' + numBlocks + '.dat', data);
+    console.log("New Block Added Successfully!");
+    processBlock(data);
+    peers.forEach(function (url) {
+        axios({
+            method: 'post',
+            url : url + '/newBlock',
+            data : data,
+            headers : {'Content-Type' : 'application/octet-stream'}
+        })
+        .then(function (response) {
+            console.log("Sent Block");
+        })
+        .catch(function(err) {
+            console.log(err);
+        })
+    })
     console.log("Block : ", data);
 }
 
@@ -645,13 +661,10 @@ app.get ('/getPeers', function(req, res) {
 app.post ('/newBlock', function(req, res) {
     const data = req.body;
     console.log("Block received");
-    //console.log(data);
+    console.log(data);
     if (verifyBlock(data) === true) {
         stopMining(worker);
-        numBlocks++;
-        status = false;
-        fs.writeFileSync('Blocks/' + numBlocks + '.dat', data);
-        console.log("New Block Added Successfully!");
+        post_new_block(data);
         res.send("Block Added");
     }
     else {
