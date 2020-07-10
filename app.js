@@ -16,13 +16,17 @@ const app = express();
 app.use (bodyParser.urlencoded({extended : true}));
 app.use (bodyParser.json());
 
-const myUrl = "";
+let info = JSON.parse(fs.readFileSync('./config.json'));
+
+const myUrl = info["my-url"];
+const publicKey = info["public-key"];
+const port = info["port"];
 
 let unusedOutputs = {};
 let allUrls = ["http://e8516e86ec21.ngrok.io"];
 let pendingTransactions = [];
 let peers = ["http://8d6ef19df84f.ngrok.io"];
-let potentialPeers = [];
+let potentialPeers = info["potential-peers"];
 let tempOutputs = {};
 let numBlocks = 0;
 let blockReward = 0;
@@ -294,7 +298,7 @@ function mineBlock(worker) {
     let data = [];
     let block_data = [];
     let cur = 0;
-    let fees = 0;
+    let fees = 0n;
     let index = numBlocks + 1;
     let parent_hash = getBlockHash(numBlocks);
     let target = "0000f" + '0'.repeat(60);
@@ -686,6 +690,6 @@ app.post ('/newTransaction', function(req, res) {
     res.send("Transaction added");
 })
 
-app.listen (3000, function() {
-    console.log("Server started on port 3000");
+app.listen (port, function() {
+    console.log("Server started on port " + port);
 })
