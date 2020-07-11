@@ -23,9 +23,11 @@ const publicKey = info["public-key"];
 const port = info["port"];
 
 let unusedOutputs = {};
+let keys = {};
+let outputs = {};
 let allUrls = ["http://e8516e86ec21.ngrok.io"];
 let pendingTransactions = [];
-let peers = ["http://8d6ef19df84f.ngrok.io"];
+let peers = ["http://fae438e2bef6.ngrok.io"];
 let potentialPeers = info["potential-peers"];
 let tempOutputs = {};
 let numBlocks = 0;
@@ -303,6 +305,8 @@ function mineBlock(worker) {
     let parent_hash = getBlockHash(numBlocks);
     let target = "0000f" + '0'.repeat(60);
 
+    if (pendingTransactions.length === 0) return;
+
     while (cur < pendingTransactions.length) {
         let buffer = transactionToByteArray(pendingTransactions[cur]);
         size += buffer.length;
@@ -466,6 +470,18 @@ function processBlock (block) {
             let output = trans.Outputs[k];
             let tup = [transID, k];
             unusedOutputs[tup] = output;
+            let pub_key = output.pubKey;
+            let obj = {};
+            obj.transactionId = transID;
+            obj.index = k;
+            obj.amount = output.coins;
+            if (pub_key in outputs) {
+                outputs[pub_key].push(obj);
+            }
+            else {
+                outputs[pub_key] = [];
+                outputs[pub_key].push(obj);
+            }
         }
     }
     console.log("Processing of block done!!");
@@ -607,6 +623,68 @@ app.use(function (req, res, next) {
         next();
     }
 });
+
+app.post('/addAlias', function(req, res) {
+    let alias = req.body.alias;
+    let public_key = req.body.publicKey;
+    if (alias in keys) {
+        res.sendStatus(400);
+    }
+    else {
+        peers.forEach(function (url) {
+            axios.post(url + '/addAlias', {
+                alias : alias,
+                publicKey : public_key
+            })
+            .then(function(response) {
+                console.log("Alias: ", alias, "sent to url: ", url);
+            })
+            .catch(function(err) {
+                console.log(err);
+            })
+        })
+        keys[alias] = public_key;
+        console.log(keys[alias]);
+        res.sendStatus(200);
+    }
+});
+
+app.get('/getPublicKey', function(req, res) {
+    let alias = req.body.alias;
+    if (alias in keys) {
+        let pubKey = keys[alias];
+        res.set('Content-type', 'application/json');
+        res.send({publicKey : pubKey});
+    }
+    else res.sendStatus(404);
+})
+
+app.get('/getUnusedOutputs', function(req, res) {
+    let pubKey = req.body.publicKey;
+    let alias = req.body.alias;
+    if (pubKey !== undefined) {
+        if (pubKey in outputs) {
+            let obj = {};
+            obj["unusedOutputs"] = objects[pubKey];
+            res.set('Content-type', 'application/json');
+            res.send(obj);
+        }
+        else res.sendStatus(404);
+    }
+    else if (alias !== undefined) {
+        if (alias in keys) {
+            pubKey = keys[alias];
+            let obj = {};
+            if (pubKey in outputs) {
+                obj["unusedOuptuts"] = objects[pubKey];
+                res.set('Content-type', 'application/json');
+                res.send(obj);
+            }
+            else res.sendStatus(404);
+        }
+        else res.sendStatus(404);
+    }
+}) 
 
 app.get ('/getBlock/:number', function(req, res) {
     const n = req.params.number;
