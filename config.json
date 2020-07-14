@@ -1,6 +1,5 @@
 {
-    "public-key" : "",
-    "my-url" : "",
+    "my-url" : "https://localhost:3000",
     "potential-peers" : [],
     "port" : 3000
 }

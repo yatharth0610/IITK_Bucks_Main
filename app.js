@@ -19,15 +19,15 @@ app.use (bodyParser.json());
 let info = JSON.parse(fs.readFileSync('./config.json'));
 
 const myUrl = info["my-url"];
-const publicKey = info["public-key"];
+const publicKey = fs.readFileSync('./public.pem');
 const port = info["port"];
 
 let unusedOutputs = {};
 let keys = {};
 let outputs = {};
-let allUrls = ["http://e8516e86ec21.ngrok.io"];
+let allUrls = [];
 let pendingTransactions = [];
-let peers = ["http://fae438e2bef6.ngrok.io"];
+let peers = ["https://iitkbucks.pclub.in"];
 let potentialPeers = info["potential-peers"];
 let tempOutputs = {};
 let numBlocks = 0;
@@ -99,7 +99,7 @@ function getDetails (str) {
     curr = curr + 4;
 
     for (let i = 0; i < numInputs; i++) {
-        let transactionID = (Buffer.from(str)).toString("hex", curr, curr+32);
+        let transactionId = (Buffer.from(str)).toString("hex", curr, curr+32);
         curr += 32;
         let index = getInt(str, curr, curr+4);
         curr += 4;
@@ -107,7 +107,8 @@ function getDetails (str) {
         curr += 4;
         let signature = (Buffer.from(str)).toString("hex", curr, curr + sign_length);
         curr += sign_length;
-        let In = new Input(transactionID, index, sign_length, signature);
+        //console.log(signature);
+        let In = new Input(transactionId, index, sign_length, signature);
         Inputs.push(In);
     }
 
@@ -136,7 +137,7 @@ function transactionToByteArray (transaction) {
     data = [...data];
     for (let i = 0; i < transaction.numInputs; i++) {
         let temp = [];
-        let str1 = transaction.Inputs[i].transactionID;
+        let str1 = transaction.Inputs[i].transactionId;
         temp = new Uint8Array(Buffer.from(str1, 'hex'));
         temp = [...temp];
         while (temp.length != 32) temp.unshift(0);
@@ -194,8 +195,7 @@ function createHash (numOutputs, Outputs) {
     for (let i = 0; i < numOutputs; i++){
         let arr = [];
         let num1 = Outputs[i].coins;
-        arr = new Uint8Array(arr.concat(toBytesInt64(num1)));
-        arr = [...arr];
+        arr = arr.concat([...toBytesInt64(num1)]);
         data = data.concat(arr);
         let num2 = Outputs[i].pubkey_len;
         arr = [];
@@ -214,6 +214,7 @@ function createHash (numOutputs, Outputs) {
 
 function verifyTrans1(trans, fees) {
     let data = getDetails(trans);
+    console.log(data);
     if (data.Ouputs[0].coins <= fees + blockReward) return true;
     else return false;
 }
@@ -229,8 +230,9 @@ function verifyTransaction(trans) {
     // Checks if the same unused output is not used twice
     let temp = {};
     for (let i = 0; i < numInputs; i++) {
-        let tup = [Inputs[i].transactionID, Inputs[i].index];
+        let tup = [Inputs[i].transactionId, Inputs[i].index];
         if (tup in temp) {
+            console.log("Due to 1");
             flag = 0;
             break;
         }
@@ -241,9 +243,10 @@ function verifyTransaction(trans) {
     // Checks if all the inputs are present in unused outputs or not.
     if (flag) {
         for (let i = 0; i < numInputs; i++) {
-            let tup = [Inputs[i].transactionID, Inputs[i].index];
+            let tup = [Inputs[i].transactionId, Inputs[i].index];
             if (tup in unusedOutputs) continue;
             else {
+                console.log("Due to 2");
                 flag = 0;
                 break;           
             }
@@ -254,16 +257,19 @@ function verifyTransaction(trans) {
     }
     // Checks if the amount of coins used is less than amount of coins obtained.
     if (flag) {
-        let coinsUsed = 0;
-        let coinsHave = 0;
+        let coinsUsed = 0n;
+        let coinsHave = 0n;
         for (let i = 0; i < numInputs; i++) {
-            let tup = [Inputs[i].transactionID, Inputs[i].index];
+            let tup = [Inputs[i].transactionId, Inputs[i].index];
             coinsHave += unusedOutputs[tup].coins;
         }
         for (let i = 0; i < numOutputs; i++) {
             coinsUsed += Outputs[i].coins;
         }
-        if (coinsUsed > coinsHave) flag = 0;
+        if (coinsUsed > coinsHave) {
+            console.log("Due to 3");
+            flag = 0;
+        }
     }
     else {
         return false;
@@ -272,14 +278,32 @@ function verifyTransaction(trans) {
     if (flag) {
         let message = createHash(numOutputs, Outputs);
         for (let i = 0; i < numInputs; i++) {
-            let tup = [Inputs[i].transactionID, Inputs[i].index];
-            let pubKey = unusedOutputs[tup].pubKey;
-            const verify = crypto.createVerify('SHA256');
-            verify.update(Buffer.from(message, 'utf8'));
-            verifyRes = verify.verify({key:pubKey, padding:crypto.constants.RSA_PKCS1_PSS_PADDING}, Buffer.from(Inputs[i].sign, 'hex'));
-            if (verifyRes === false) {
-                flag = 0;
-                return false;
+            let data = [];
+            let temp = [];
+            temp = new Uint8Array(Buffer.from(Inputs[i].transactionId, 'hex'));
+            temp = [...temp];
+            data = data.concat(temp);
+            temp = [];
+            temp = new Uint8Array(temp.concat(toBytesInt32(Inputs[i].index))[0]);
+            temp = [...temp];
+            data = data.concat(temp);
+            temp = [];
+            temp = new Uint8Array(Buffer.from(message, 'hex'));
+            temp = [...temp];
+            data = data.concat(temp);
+            console.log(Buffer.from(data));
+            let tup = [Inputs[i].transactionId, Inputs[i].index];
+            if (tup in unusedOutputs) {
+                let pubKey = unusedOutputs[tup].pubkey;
+                const verify = crypto.createVerify('sha256');
+                verify.update(Buffer.from(data));
+                console.log(Inputs[i].sign);
+                verifyRes = verify.verify({key:pubKey, padding:crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength:32}, Buffer.from(Inputs[i].sign, 'hex'));
+                if (verifyRes === false) {
+                    console.log("Due to 4");
+                    flag = 0;
+                    return false;
+                }
             } 
         }
     }
@@ -316,7 +340,7 @@ function mineBlock(worker) {
         if (verifyTransaction(trans) === true) {
             let numInputs = pendingTransactions[cur].numInputs;
             for (let i = 0; i < numInputs; i++) {
-                let tup = [pendingTransactions[cur].Inputs[i].transactionID, pendingTransactions[cur].Inputs[i].index];
+                let tup = [pendingTransactions[cur].Inputs[i].transactionId, pendingTransactions[cur].Inputs[i].index];
                 if (tup in unusedOutputs) {
                     tempOutputs[tup] = unusedOutputs[tup];
                     delete unusedOutputs[tup];
@@ -398,8 +422,9 @@ function stopMining(worker) {
 /********** Functions for initialisation of a node and processing/verification of block. ************/
 
 function getPeers (url) {
-    axios.post (url + '/newPeer', { 
-        key : "url", value : myUrl}, { headers : {key : myUrl}, params : { key : myUrl}}) 
+    axios.post (url + '/newPeer', {
+            "url" : myUrl,
+        }) 
         .then((res) => {
             if (res.status === 200) {
                 peers.push(url);
@@ -417,29 +442,36 @@ function getPeers (url) {
         })
         .catch((err) => {
             console.log(err);
+            axios.get (url + '/getPeers')
+            .then((res) => {
+                let data = res.peers;
+                data.forEach(function (peer) {
+                    potentialPeers.push(peer);
+                }) 
+            })
         })
 }
 
 async function saveBlock (blockNum, link) {
     const url = link + "/getBlock/" + blockNum;
 
-    axios.get (url, 
-        {
-            responseType : 'stream',
-        })
+    axios.get (url, {
+        responseType : 'arraybuffer'
+    })
         .then ((response) => {
             const data = response.data;
-            if (verifyBlock(data) === true) { 
-                fs.writeFileSync("/Blocks/" + blockNum + ".dat", data);
-                console.log("successful");
-                blockNum++;
+            if (verifyBlock(Buffer.from(data)) === true) { 
+                fs.writeFileSync("./Blocks/" + blockNum + ".dat", data);
+                processBlock(Buffer.from(data));
+                console.log("successful ", blockNum);
+                numBlocks = blockNum + 1;
             }
             else console.log("Invalid Block!");
-            saveBlock(blockNum, link);
+            saveBlock(blockNum+1, link);
             return true;
         })
         .catch ((err) => {
-            console.log("Unsuccessful");
+            console.log(err);
             return false;
         })
 }
@@ -448,28 +480,30 @@ function processBlock (block) {
     let str = block;
     let cur = 116;
     let numtransactions = getInt (str, cur, cur+4);
+    console.log("Number of transactions : ", numtransactions);
     cur += 4;
-    for (let i = 1; i < numtransactions; i++) {
+    for (let i = 0; i < numtransactions; i++) {
         let size = getInt(str, cur, cur+4);
         cur += 4;
         let transID = crypto.createHash('sha256').update(Buffer.from(str.slice(cur, cur+size))).digest('hex');
         let trans = getDetails(str.slice(cur, cur + size));
+        console.log(trans);
         cur += size;
         removeTransaction(pendingTransactions, trans);
         let numInputs = trans.numInputs;
         for (let j = 0; j < numInputs; j++) {
             let input = trans.Inputs[j];
-            let tup = [input.transactionID, input.index];
+            let tup = [input.transactionId, input.index];
             if (tup in unusedOutputs){
                 delete unusedOutputs[tup];
             }
         }
         let numOutputs = trans.numOutputs;
-        console.log(numOutputs);
         for (let k = 0; k < numOutputs; k++) {
             let output = trans.Outputs[k];
             let tup = [transID, k];
             unusedOutputs[tup] = output;
+            console.log("Unused Outputs : ", unusedOutputs);
             let pub_key = output.pubKey;
             let obj = {};
             obj.transactionId = transID;
@@ -490,8 +524,9 @@ function processBlock (block) {
 function verifyBlock (block) {
     let header = block.slice(0,116);
     let index = getInt(block, 0, 4);
-    if (index !== 1) {
-        let fees = 0;
+    console.log(index);
+    if (index !== 0) {
+        let fees = 0n;
         let cur = 116;
         let numtransactions = getInt (block, cur, cur+4);
         cur += 4;
@@ -510,20 +545,29 @@ function verifyBlock (block) {
             let numOutputs = data.numOutputs;
             let outputs = data.Outputs;
             for (let i = 0; i < numInputs; i++) {
-                let tup = [inputs[i].transactionID, inputs[i].index];
+                let tup = [inputs[i].transactionId, inputs[i].index];
                 fees += unusedOutputs[tup].coins;
             }
             for (let i = 0; i < numOutputs; i++) {
                 fees -= outputs[i].coins;
             }
             if (verifyTransaction(trans) === false) {
+                    console.log("Due to verifyTransaction");
                     return false;
             }
         }
-        if (!verifyTrans1(trans1, fees)) return false;
+        if (!verifyTrans1(trans1, fees)) {
+            console.log("Due to verifyTrans1");
+            return false;
+        }
     }
     let hashed = crypto.createHash('sha256').update(Buffer.from(block.slice(116))).digest('hex');
+    console.log(hashed);
     if (verifyHeader(header, hashed)) return true;
+    else {
+        console.log("Due to header");
+        return false;
+    }
 }
 
 function verifyHeader (header, hash) {
@@ -541,9 +585,9 @@ function verifyHeader (header, hash) {
     let nonce = getInt (header, cur, cur + 8);
     if (bodyHash !== hash) return false;
     else {
-        if (index === 1) {
+        if (index === 0) {
             if (parentHash !== '0'.repeat(64)) return false;
-            else if (target !== '0'.repeat(7) + 'f' + '0'.repeat(56)) return false;
+            else if (target !== '0'.repeat(5) + 'f' + '0'.repeat(58)) return false;
             else {
                 let hashed = crypto.createHash('sha256').update(header).digest('hex');
                 if (hashed >= target) return false;
@@ -578,9 +622,9 @@ function getBlocks() {
     if (peers.length !== 0) {
         let peer = peers[0];
         console.log("Peer found");
-        let blockNum = 1;
+        let blockNum = 0;
         saveBlock(blockNum, peer);
-        pendingtrans(peer);
+        //pendingtrans(peer);
     }
     else {
         console.log("Found no peer!");
@@ -602,6 +646,10 @@ function pendingtrans(peer) {
         })
         console.log(pendingTransactions);
     })
+    .catch((err) => {
+        console.log(err);
+    })
+
 }
 
 /************** Functions for handling of various routes on the server. *************/
@@ -662,7 +710,7 @@ app.get('/getPublicKey', function(req, res) {
 app.get('/getUnusedOutputs', function(req, res) {
     let pubKey = req.body.publicKey;
     let alias = req.body.alias;
-    if (pubKey !== undefined) {
+    if (typeof pubKey !== undefined) {
         if (pubKey in outputs) {
             let obj = {};
             obj["unusedOutputs"] = objects[pubKey];
@@ -671,7 +719,7 @@ app.get('/getUnusedOutputs', function(req, res) {
         }
         else res.sendStatus(404);
     }
-    else if (alias !== undefined) {
+    else if (typeof alias !== undefined) {
         if (alias in keys) {
             pubKey = keys[alias];
             let obj = {};
@@ -770,4 +818,5 @@ app.post ('/newTransaction', function(req, res) {
 
 app.listen (port, function() {
     console.log("Server started on port " + port);
+    getBlocks();
 })
