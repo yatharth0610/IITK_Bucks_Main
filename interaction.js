@@ -6,7 +6,7 @@ const Input = require ("./classes/Input");
 const Output = require ("./classes/Output");
 const readlineSync = require('readline-sync');
 
-const myUrl = "https://localhost:3000";
+const myUrl = "https://iitkbucks.pclub.in";
 const works = ["Check Balance", "Generate Keys", "Transfer Coins", "Add Alias"];
 
 let index = readlineSync.keyInSelect(works, 'Which task do you want to perform?');
@@ -31,14 +31,13 @@ function checkBalance() {
     let options = ["Public Key", "Alias"];
     let ind = readlineSync.keyInSelect(options, 'Select the option that you want to provide:');
     if (ind === 0) {
-        let pubKey = readlineSync.question("Enter the path of the public Key:");
-        axios.get(myUrl + '/getUnusedOutputs', {
-            params : {
-                publicKey : pubKey
-            }
+        let path = readlineSync.question("Enter the path of the public Key:");
+        let pubKey = fs.readFileSync(path).toString('utf-8');
+        axios.post(myUrl + '/getUnusedOutputs', {
+            publicKey : pubKey
         })
         .then((res) => {
-            let unusedOutputs = res.unusedOutputs;
+            let unusedOutputs = res.data.unusedOutputs;
             let balance = 0;
             for (let i = 0; i < unusedOutputs.length; i++) {
                 balance += unusedOutputs[i].amount;
@@ -51,13 +50,11 @@ function checkBalance() {
     }
     else {
         let alias = readlineSync.question("Enter your alias:");
-        axios.get(myUrl + '/getUnusedOutputs', {
-            params : {
-                alias : alias
-            }
+        axios.post(myUrl + '/getUnusedOutputs', {
+            alias : alias
         })
         .then((res) => {
-            let unusedOutputs = res.unusedOutputs;
+            let unusedOutputs = res.data.unusedOutputs;
             let balance = 0;
             for (let i = 0; i < unusedOutputs.length; i++) {
                 balance += unusedOutputs[i].amount;
@@ -110,13 +107,13 @@ function addAlias() {
     console.log("Add alias");
     const alias = readlineSync.question("Enter your alias :");
     const path = readlineSync.question("Enter the path for public key:");
-    const publicKey = fs.readFileSync(path);
-    axios.post(myUrl, {
-        "alias" : alias,
-        "publicKey" : publicKey
+    const publicKey = fs.readFileSync(path).toString('utf-8');
+    axios.post(myUrl + '/addAlias', {
+        alias : alias,
+        publicKey : publicKey
     })
     .then((res) => {
-        console.log("Alias request sent successfully!");
+        console.log("Request sent");
     })
     .catch((err) => {
         console.log(err);

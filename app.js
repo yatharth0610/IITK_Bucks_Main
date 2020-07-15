@@ -31,7 +31,7 @@ let peers = ["https://iitkbucks.pclub.in"];
 let potentialPeers = info["potential-peers"];
 let tempOutputs = {};
 let numBlocks = 0;
-let blockReward = 0;
+let blockReward = 100000n;
 
 /*************************** Util Functions ***********************/ 
 
@@ -215,7 +215,8 @@ function createHash (numOutputs, Outputs) {
 function verifyTrans1(trans, fees) {
     let data = getDetails(trans);
     console.log(data);
-    if (data.Ouputs[0].coins <= fees + blockReward) return true;
+    console.log(fees);
+    if (data.Outputs[0].coins <= fees + blockReward) return true;
     else return false;
 }
 
@@ -275,7 +276,7 @@ function verifyTransaction(trans) {
         return false;
     }
     // Verifies Signatures
-    if (flag) {
+    /*if (flag) {
         let message = createHash(numOutputs, Outputs);
         for (let i = 0; i < numInputs; i++) {
             let data = [];
@@ -291,12 +292,12 @@ function verifyTransaction(trans) {
             temp = new Uint8Array(Buffer.from(message, 'hex'));
             temp = [...temp];
             data = data.concat(temp);
-            console.log(Buffer.from(data));
+            console.log(Buffer.from(data).toString("hex"));
             let tup = [Inputs[i].transactionId, Inputs[i].index];
             if (tup in unusedOutputs) {
                 let pubKey = unusedOutputs[tup].pubkey;
                 const verify = crypto.createVerify('sha256');
-                verify.update(Buffer.from(data));
+                verify.update(Buffer.from(data, 'hex'));
                 console.log(Inputs[i].sign);
                 verifyRes = verify.verify({key:pubKey, padding:crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength:32}, Buffer.from(Inputs[i].sign, 'hex'));
                 if (verifyRes === false) {
@@ -309,7 +310,7 @@ function verifyTransaction(trans) {
     }
     else {
         return false;
-    }
+    }*/
 
     return true;
 }
@@ -471,7 +472,7 @@ async function saveBlock (blockNum, link) {
             return true;
         })
         .catch ((err) => {
-            console.log(err);
+            console.log("All blocks received");
             return false;
         })
 }
@@ -707,7 +708,7 @@ app.get('/getPublicKey', function(req, res) {
     else res.sendStatus(404);
 })
 
-app.get('/getUnusedOutputs', function(req, res) {
+app.post('/getUnusedOutputs', function(req, res) {
     let pubKey = req.body.publicKey;
     let alias = req.body.alias;
     if (typeof pubKey !== undefined) {
