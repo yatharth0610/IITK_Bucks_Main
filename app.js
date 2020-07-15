@@ -25,9 +25,9 @@ const port = info["port"];
 let unusedOutputs = {};
 let keys = {};
 let outputs = {};
-let allUrls = [];
+let allUrls = ["http://localhost:8000"];
 let pendingTransactions = [];
-let peers = ["https://iitkbucks.pclub.in"];
+let peers = [];
 let potentialPeers = info["potential-peers"];
 let tempOutputs = {};
 let numBlocks = 0;
@@ -280,7 +280,7 @@ function verifyTransaction(trans) {
         return false;
     }
     // Verifies Signatures
-    /*if (flag) {
+    if (flag) {
         let message = createHash(numOutputs, Outputs);
         for (let i = 0; i < numInputs; i++) {
             let data = [];
@@ -296,14 +296,12 @@ function verifyTransaction(trans) {
             temp = new Uint8Array(Buffer.from(message, 'hex'));
             temp = [...temp];
             data = data.concat(temp);
-            console.log(Buffer.from(data).toString("hex"));
             let tup = [Inputs[i].transactionId, Inputs[i].index];
             if (tup in unusedOutputs) {
                 let pubKey = unusedOutputs[tup].pubkey;
-                const verify = crypto.createVerify('sha256');
-                verify.update(Buffer.from(data, 'hex'));
-                console.log(Inputs[i].sign);
-                verifyRes = verify.verify({key:pubKey, padding:crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength:32}, Buffer.from(Inputs[i].sign, 'hex'));
+                const verify = crypto.createVerify('SHA256')
+                verify.update(Buffer.from(data));
+                verifyRes = verify.verify({key:pubKey, padding:crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength:32}, Buffer.from(Inputs[i].sign, 'hex'))
                 if (verifyRes === false) {
                     console.log("Due to 4");
                     flag = 0;
@@ -314,7 +312,7 @@ function verifyTransaction(trans) {
     }
     else {
         return false;
-    }*/
+    }
 
     return true;
 }
@@ -485,14 +483,12 @@ function processBlock (block) {
     let str = block;
     let cur = 116;
     let numtransactions = getInt (str, cur, cur+4);
-    console.log("Number of transactions : ", numtransactions);
     cur += 4;
     for (let i = 0; i < numtransactions; i++) {
         let size = getInt(str, cur, cur+4);
         cur += 4;
         let transID = crypto.createHash('sha256').update(Buffer.from(str.slice(cur, cur+size))).digest('hex');
         let trans = getDetails(str.slice(cur, cur + size));
-        console.log(trans);
         cur += size;
         removeTransaction(pendingTransactions, trans);
         let numInputs = trans.numInputs;
@@ -632,7 +628,7 @@ function getBlocks() {
         console.log("Peer found");
         let blockNum = 0;
         saveBlock(blockNum, peer);
-        //pendingtrans(peer);
+        pendingtrans(peer);
     }
     else {
         console.log("Found no peer!");
@@ -708,7 +704,7 @@ app.post('/addAlias', function(req, res) {
     }
 });
 
-app.get('/getPublicKey', function(req, res) {
+app.post('/getPublicKey', function(req, res) {
     let alias = req.body.alias;
     if (alias in keys) {
         let pubKey = keys[alias];
@@ -820,10 +816,18 @@ app.post ('/newTransaction', function(req, res) {
     let numInputs = inputs.length;
     let outputs = req.body.outputs;
     let numOutputs = outputs.length;
-    for (let i = 0; i < numOutputs; i++) {
-        outputs[i].coins = BigInt(outputs[i].coins);
+    let Inputs = [];
+    let Outputs = [];
+    for (let i = 0; i < numInputs; i++) {
+        let inp = new Input(inputs[i].transactionId, inputs[i].index, (inputs[i].signature.length)/2, inputs[i].signature);
+        Inputs.push(inp);
     }
-    let transaction = new Transaction (numInputs, inputs, numOutputs, outputs);
+    for (let i = 0; i < numOutputs; i++) {
+        outputs[i].amount = BigInt(outputs[i].amount);
+        let out = new Output(outputs[i].amount, outputs[i].recipient.length, outputs[i].recipient);
+        Outputs.push(out);
+    }
+    let transaction = new Transaction (numInputs, Inputs, numOutputs, Outputs);
 
     pendingTransactions.push(transaction);
     console.log(transaction);
@@ -833,5 +837,5 @@ app.post ('/newTransaction', function(req, res) {
 
 app.listen (port, function() {
     console.log("Server started on port " + port);
-    getBlocks();
+    initialiseNode();
 })

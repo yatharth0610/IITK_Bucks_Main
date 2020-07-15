@@ -6,7 +6,7 @@ const Input = require ("./classes/Input");
 const Output = require ("./classes/Output");
 const readlineSync = require('readline-sync');
 
-const myUrl = "http://localhost:3000";
+const myUrl = "https://iitkbucks.pclub.in";
 const works = ["Check Balance", "Generate Keys", "Transfer Coins", "Add Alias"];
 
 let index = readlineSync.keyInSelect(works, 'Which task do you want to perform?');
@@ -135,33 +135,30 @@ async function transferCoins() {
         if (index === 0) {
             let path = readlineSync.question('Enter the path of the public key:');
             let recipient = fs.readFileSync(path).toString('utf-8');
-            let len = recipient.length;
             let amount = BigInt(readlineSync.question('Enter the amount you want to transfer:'));
-            let output = new Output(amount, len, recipient);
+            let output = { amount : amount, recipient : recipient };
             Outputs.push(output);
         }
         else {
             let recipient = "";
             let alias = readlineSync.question('Enter the alias of the recipient:');
-            axios.get(myUrl + '/getPublicKey', {
-                params : {
+            await axios.post(myUrl + '/getPublicKey', {
                     alias : alias
-                }
             })
             .then((res) => {
-                recipient = res.publicKey;
+                recipient = res.data.publicKey;
             })
             .catch((err) => {
                 console.log(err);
             })
-            let amount = BigInt(readlineSync.question('Enter the amount you want to transefer'));
-            let output = new Output(amount, len, recipient);
+            let amount = BigInt(readlineSync.question('Enter the amount you want to transfer: '));
+            let output = { amount : amount, recipient : recipient };
             Outputs.push(output);
         }
     }
     let transactionFees = BigInt(readlineSync.question('Enter the transaction fees you want to leave:'));
     let total = transactionFees;
-    for (let i = 0; i < numOutputs; i++) total += Outputs[i].coins;
+    for (let i = 0; i < numOutputs; i++) total += Outputs[i].amount;
     if (total > balance) {
         console.log("Error!! You cannot spending more than what you have");
         return;
@@ -170,7 +167,7 @@ async function transferCoins() {
         let curSum = 0n;
         for (let i = 0; i < unusedOutputs.length; i++) curSum += BigInt(unusedOutputs[i].amount); 
         let rem = curSum-total;
-        let output = new Output(rem, pubKey.length, pubKey);
+        let output = { amount : rem, recipient : pubKey };
         Outputs.push(output);
         let hash = createHash(numOutputs+1, Outputs);
         let Inputs = [];
@@ -190,13 +187,14 @@ async function transferCoins() {
             temp = new Uint8Array(Buffer.from(hash, 'hex'));
             temp = [...temp];
             data = data.concat(temp);
+            //console.log(data, Buffer.from(data));
             const sign = crypto.createSign('SHA256');
             sign.update(Buffer.from(data));
             signature = sign.sign({key:privKey, padding:crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength:32}).toString('hex');
-            let len = signature.length/2;
-            let input = new Input(transactionId, index, len, signature);
+            let input = {"transactionId" : transactionId, "index" : index, "signature" : signature};
             Inputs.push(input);
         }
+        console.log(Inputs); console.log(Outputs);
         axios.post(myUrl + '/newTransaction', {
             "inputs" : Inputs,
             "outputs" : Outputs
@@ -260,15 +258,15 @@ function createHash (numOutputs, Outputs) {
     data = data.concat(temp);
     for (let i = 0; i < out; i++){
         let arr = [];
-        let num1 = Outputs[i].coins;
+        let num1 = BigInt(Outputs[i].amount);
         arr = arr.concat([...toBytesInt64(num1)]);
         data = data.concat(arr);
-        let num2 = Outputs[i].pubkey_len;
+        let num2 = Outputs[i].recipient.length;
         arr = [];
         arr = new Uint8Array(arr.concat(toBytesInt32(num2))[0]);
         arr = [...arr];
         data = data.concat(arr);
-        let str = Outputs[i].pubkey;
+        let str = Outputs[i].recipient;
         arr = [];
         arr = new Uint8Array(Buffer.from(str, 'utf-8'));
         arr = [...arr];
