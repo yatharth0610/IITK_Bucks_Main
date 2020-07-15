@@ -6,7 +6,7 @@ const Input = require ("./classes/Input");
 const Output = require ("./classes/Output");
 const readlineSync = require('readline-sync');
 
-const myUrl = "https://iitkbucks.pclub.in";
+const myUrl = "http://localhost:3000";
 const works = ["Check Balance", "Generate Keys", "Transfer Coins", "Add Alias"];
 
 let index = readlineSync.keyInSelect(works, 'Which task do you want to perform?');
@@ -38,9 +38,9 @@ function checkBalance() {
         })
         .then((res) => {
             let unusedOutputs = res.data.unusedOutputs;
-            let balance = 0;
+            let balance = 0n;
             for (let i = 0; i < unusedOutputs.length; i++) {
-                balance += unusedOutputs[i].amount;
+                balance += BigInt(unusedOutputs[i].amount);
             }
             console.log("Your balance is: " + balance + " coins");
         })
@@ -55,9 +55,9 @@ function checkBalance() {
         })
         .then((res) => {
             let unusedOutputs = res.data.unusedOutputs;
-            let balance = 0;
+            let balance = 0n;
             for (let i = 0; i < unusedOutputs.length; i++) {
-                balance += unusedOutputs[i].amount;
+                balance += BigInt(unusedOutputs[i].amount);
             }
             console.log("Your balance is: " + balance + " coins");
         })
@@ -120,37 +120,23 @@ function addAlias() {
     })
 }
 
-function transferCoins() {
+async function transferCoins() {
     console.log("Transfer coins");
-    let pubKey = readlineSync.question('Enter the path of your Public Key:');
-    let privKey = readlineSync.question('Enter the path of the private key:');
-    let balance = 0;
-    let unusedOutputs = [];
-    axios.get(myUrl + '/getUnusedOutputs', {
-        params : {
-            publicKey : pubKey
-        }
-    })
-    .then((res) => {
-        unusedOutputs = res.unusedOutputs;
-        for (let i = 0; i < unusedOutputs.length; i++) {
-            balance += unusedOutputs[i].amount;
-        }
-        console.log("Your balance is: " + balance + " coins");
-    })
-    .catch((err) => {
-        console.log(err);
-    })
-    let numOutputs = readlineSync.question('Enter the number of outputs:');
+    let pubKey = fs.readFileSync(readlineSync.question('Enter the path of your public Key:')).toString('utf-8');
+    let privKey = fs.readFileSync(readlineSync.question('Enter the path of the private key:')).toString('utf-8');
+    let obj = await getBalance(pubKey);
+    let unusedOutputs = obj.unusedOutputs;
+    let balance = BigInt(obj.balance);
+    let numOutputs = Number(readlineSync.question('Enter the number of outputs:'));
     let Outputs = [];
     for (let i = 0; i < numOutputs; i++) {
         let options = ["Public Key", "Alias"];
         let index = readlineSync.keyInSelect(options, 'Select the option that you want to use:');
         if (index === 0) {
             let path = readlineSync.question('Enter the path of the public key:');
-            let recipient = fs.readFileSync(path);
-            let len = recipient.length/2;
-            let amount = readlineSync.question('Enter the amount you want to transfer:');
+            let recipient = fs.readFileSync(path).toString('utf-8');
+            let len = recipient.length;
+            let amount = BigInt(readlineSync.question('Enter the amount you want to transfer:'));
             let output = new Output(amount, len, recipient);
             Outputs.push(output);
         }
@@ -168,23 +154,23 @@ function transferCoins() {
             .catch((err) => {
                 console.log(err);
             })
-            let amount = readlineSync.question('Enter the amount you want to transefer');
+            let amount = BigInt(readlineSync.question('Enter the amount you want to transefer'));
             let output = new Output(amount, len, recipient);
             Outputs.push(output);
         }
     }
-    let transactionFees = readlineSync.question('Enter the transaction fees you want to leave:');
+    let transactionFees = BigInt(readlineSync.question('Enter the transaction fees you want to leave:'));
     let total = transactionFees;
     for (let i = 0; i < numOutputs; i++) total += Outputs[i].coins;
-    if (total < balance) {
-        console.log("Error you are spending more than what you have");
+    if (total > balance) {
+        console.log("Error!! You cannot spending more than what you have");
         return;
     }
     else {
-        let curSum = 0;
-        for (let i = 0; i < unusedOutputs.length; i++) curSum += unusedOutputs[i].amount; 
+        let curSum = 0n;
+        for (let i = 0; i < unusedOutputs.length; i++) curSum += BigInt(unusedOutputs[i].amount); 
         let rem = curSum-total;
-        let output = new Output(rem, pubKey.length/2, pubKey);
+        let output = new Output(rem, pubKey.length, pubKey);
         Outputs.push(output);
         let hash = createHash(numOutputs+1, Outputs);
         let Inputs = [];
@@ -211,7 +197,7 @@ function transferCoins() {
             let input = new Input(transactionId, index, len, signature);
             Inputs.push(input);
         }
-        axios.post(myUrl, {
+        axios.post(myUrl + '/newTransaction', {
             "inputs" : Inputs,
             "outputs" : Outputs
         })
@@ -224,6 +210,47 @@ function transferCoins() {
     }
 }
 
+/******************* Utility Functions *******************/
+
+BigInt.prototype.toJSON = function() {
+    return this.toString();
+}
+
+async function getBalance(pubKey) {
+    let unusedOutputs = [];
+    let balance = 0n;
+    await axios.post(myUrl + '/getUnusedOutputs', {
+        publicKey : pubKey
+    })
+    .then((res) => {
+        unusedOutputs = res.data.unusedOutputs;
+        for (let i = 0; i < unusedOutputs.length; i++) {
+            balance += BigInt(unusedOutputs[i].amount);
+        }
+        console.log("Your balance is: " + balance + " coins");
+    })
+    .catch((err) => {
+        console.log(err);
+    })
+    return { balance : balance, unusedOutputs : unusedOutputs };
+}
+
+function toBytesInt32 (num) {
+    arr = new ArrayBuffer(4); 
+    view = new DataView(arr);
+    view.setUint32(0, num, false); 
+    return arr;
+}
+
+function toBytesInt64 (num){
+    let arr = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) {
+        arr[7-i] = parseInt(num%256n);
+        num = num/256n;
+    }
+    return arr;
+}
+
 function createHash (numOutputs, Outputs) {
     let data = [];
     let out = numOutputs;
@@ -231,7 +258,7 @@ function createHash (numOutputs, Outputs) {
     temp = new Uint8Array(temp.concat(toBytesInt32(out))[0]);
     temp = [...temp];
     data = data.concat(temp);
-    for (let i = 0; i < numOutputs; i++){
+    for (let i = 0; i < out; i++){
         let arr = [];
         let num1 = Outputs[i].coins;
         arr = arr.concat([...toBytesInt64(num1)]);

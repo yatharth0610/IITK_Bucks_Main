@@ -35,6 +35,10 @@ let blockReward = 100000n;
 
 /*************************** Util Functions ***********************/ 
 
+BigInt.prototype.toJSON = function() {
+    return this.toString();
+}
+
 function removeTransaction(array, elem) {
     _.remove(array, function(e) {
         return _.isEqual(e, elem);
@@ -496,7 +500,10 @@ function processBlock (block) {
             let input = trans.Inputs[j];
             let tup = [input.transactionId, input.index];
             if (tup in unusedOutputs){
+                let pubKey = unusedOutputs[tup].pubkey;
+                let object = {transactionId : tup[0], index : tup[1], amount : unusedOutputs[tup].coins};
                 delete unusedOutputs[tup];
+                removeTransaction(outputs[pubKey], object);
             }
         }
         let numOutputs = trans.numOutputs;
@@ -505,7 +512,7 @@ function processBlock (block) {
             let tup = [transID, k];
             unusedOutputs[tup] = output;
             console.log("Unused Outputs : ", unusedOutputs);
-            let pub_key = output.pubKey;
+            let pub_key = output.pubkey;
             let obj = {};
             obj.transactionId = transID;
             obj.index = k;
@@ -642,6 +649,9 @@ function pendingtrans(peer) {
             let numInputs = Inputs.length;
             let Outputs = trans.outputs;
             let numOutputs = Outputs.length;
+            for (let i = 0; i < numOutputs; i++) {
+                Outputs[i].coins = BigInt(Outputs[i].coins);
+            }
             let transaction = new Transaction(numInputs, Inputs, numOutputs, Ouputs);
             pendingTransactions.push(transaction);
         })
@@ -711,21 +721,22 @@ app.get('/getPublicKey', function(req, res) {
 app.post('/getUnusedOutputs', function(req, res) {
     let pubKey = req.body.publicKey;
     let alias = req.body.alias;
-    if (typeof pubKey !== undefined) {
+    if (pubKey !== undefined) {
+        console.log(1);
         if (pubKey in outputs) {
             let obj = {};
-            obj["unusedOutputs"] = objects[pubKey];
+            obj["unusedOutputs"] = outputs[pubKey];
             res.set('Content-type', 'application/json');
             res.send(obj);
         }
         else res.sendStatus(404);
     }
-    else if (typeof alias !== undefined) {
+    else if (alias !== undefined) {
         if (alias in keys) {
             pubKey = keys[alias];
             let obj = {};
             if (pubKey in outputs) {
-                obj["unusedOuptuts"] = objects[pubKey];
+                obj["unusedOutputs"] = outputs[pubKey];
                 res.set('Content-type', 'application/json');
                 res.send(obj);
             }
@@ -809,10 +820,13 @@ app.post ('/newTransaction', function(req, res) {
     let numInputs = inputs.length;
     let outputs = req.body.outputs;
     let numOutputs = outputs.length;
+    for (let i = 0; i < numOutputs; i++) {
+        outputs[i].coins = BigInt(outputs[i].coins);
+    }
     let transaction = new Transaction (numInputs, inputs, numOutputs, outputs);
 
     pendingTransactions.push(transaction);
-    console.log(inputs[0]);
+    console.log(transaction);
     console.log("Transaction added successfully!");
     res.send("Transaction added");
 })
