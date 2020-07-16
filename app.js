@@ -25,9 +25,9 @@ const port = info["port"];
 let unusedOutputs = {};
 let keys = {};
 let outputs = {};
-let allUrls = ["http://localhost:8000"];
+let allUrls = [];
 let pendingTransactions = [];
-let peers = [];
+let peers = ["https://iitkbucks.pclub.in"];
 let potentialPeers = info["potential-peers"];
 let tempOutputs = {};
 let numBlocks = 0;
@@ -837,5 +837,5 @@ app.post ('/newTransaction', function(req, res) {
 
 app.listen (port, function() {
     console.log("Server started on port " + port);
-    initialiseNode();
+    getBlocks();
 })
