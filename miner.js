@@ -33,10 +33,10 @@ function mine(header, target) {
         temp2 = new Uint8Array(toBytesInt64(nonce));
         temp2 = [...temp2];
         temp2 = header.concat(temp2);
-        hashed = crypto.createHash('sha256').update("dryairship" + nonce).digest('hex');
+        hashed = crypto.createHash('sha256').update(Buffer.from(temp2)).digest('hex');
         if (nonce%1000000n === 0) console.log(nonce, hashed);
     } while (hashed >= target);
-    
+
     let temp1 = new Uint8Array(toBytesInt64(timestamp));
     temp1 = [...temp1];
     header = header.concat(temp1);
