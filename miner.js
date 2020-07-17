@@ -32,7 +32,7 @@ function mine(header, target) {
         let temp2 = [];
         temp2 = new Uint8Array(toBytesInt64(nonce));
         temp2 = [...temp2];
-        temp2 = header.concat(temp2);
+        temp2 = temp1.concat(temp2);
         hashed = crypto.createHash('sha256').update(Buffer.from(temp2)).digest('hex');
         if (nonce%1000000n === 0) console.log(nonce, hashed);
     } while (hashed >= target);
