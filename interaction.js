@@ -6,7 +6,7 @@ const Input = require ("./classes/Input");
 const Output = require ("./classes/Output");
 const readlineSync = require('readline-sync');
 
-const myUrl = "http://localhost:3000";
+const myUrl = "https://81ee14f54b57.ngrok.io";
 const works = ["Check Balance", "Generate Keys", "Transfer Coins", "Add Alias"];
 
 let index = readlineSync.keyInSelect(works, 'Which task do you want to perform?');

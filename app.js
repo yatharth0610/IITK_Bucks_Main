@@ -25,9 +25,9 @@ const port = info["port"];
 let unusedOutputs = {};
 let keys = {};
 let outputs = {};
-let allUrls = [];
+let allUrls = ["https://iitkbucks.pclub.in"];
 let pendingTransactions = [];
-let peers = ["https://iitkbucks.pclub.in"];
+let peers = [];
 let potentialPeers = info["potential-peers"];
 let tempOutputs = {};
 let numBlocks = 0;
@@ -412,7 +412,7 @@ function post_new_block(data) {
                 console.log("Sent Block");
             })
             .catch(function(err) {
-                console.log(err);
+                //console.log(err);
             })
         })
         console.log("Block : ", data);
@@ -426,7 +426,7 @@ function stopMining(worker) {
 
 /********** Functions for initialisation of a node and processing/verification of block. ************/
 
-function getPeers (url) {
+async function getPeers (url) {
     axios.post (url + '/newPeer', {
             "url" : myUrl,
         }) 
@@ -435,25 +435,17 @@ function getPeers (url) {
                 peers.push(url);
                 console.log(peers);
             }
-            else if (res.status === 500) {
-                axios.get (url + '/getPeers')
-                    .then((res) => {
-                        let data = res.data.peers;
-                        data.forEach(function (peer) {
-                            potentialPeers.push(peer);
-                        }) 
-                    })
-            }
         })
-        .catch((err) => {
+        .catch(async (err) => {
             console.log(err);
-            axios.get (url + '/getPeers')
+            await axios.get (url + '/getPeers')
             .then((res) => {
                 let data = res.data.peers;
                 data.forEach(function (peer) {
                     potentialPeers.push(peer);
+                    console.log(potentialPeers);
                 }) 
-            })
+            }).catch(err => console.log("Invalid request"));
         })
 }
 
@@ -635,7 +627,7 @@ async function initialiseNode () {
 
 function getBlocks() {
     if (peers.length !== 0) {
-        let peer = peers[0];
+        let peer = "https://iitkbucks.pclub.in";
         console.log("Peer found");
         let blockNum = 0;
         saveBlock(blockNum, peer);
@@ -803,7 +795,7 @@ app.post ('/newPeer', function(req, res) {
         res.sendStatus(200);
     }
     else {
-        res.sendStatus(500);
+        res.status(500).send("Peer limit reached");
     }
 });
 
@@ -831,6 +823,7 @@ app.post ('/newBlock', function(req, res) {
 });
 
 app.post ('/newTransaction', function(req, res) {
+    console.log("Transaction received");
     let inputs = req.body.inputs;
     let numInputs = inputs.length;
     let outputs = req.body.outputs;
@@ -848,7 +841,7 @@ app.post ('/newTransaction', function(req, res) {
     }
     let transaction = new Transaction (numInputs, Inputs, numOutputs, Outputs);
     
-    if (!_.find(pendingTransactions, transaction)){
+    if (!_.find(pendingTransactions, transaction) && verifyTransaction(transactionToByteArray(transaction))){
         pendingTransactions.push(transaction);
         console.log(pendingTransactions);
         console.log("Transaction added successfully!");
@@ -861,17 +854,17 @@ app.post ('/newTransaction', function(req, res) {
                 console.log("Transaction successfully sent to", url);
             })
             .catch((err) => {
-                console.log(err);
+                //console.log(err);
             })
         })
-        mineBlock(worker);
     }
     res.send("Transaction Added");
 })
 
 app.listen (port, function() {
     console.log("Server started on port " + port);
-    setInterval(() => {
+    initialiseNode();
+    /*setInterval(() => {
         mineBlock(worker);
-    }, 480000);
+    }, 480000);*/
 })
