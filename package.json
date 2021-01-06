@@ -9,7 +9,7 @@
   "author": "Yatharth",
   "license": "ISC",
   "dependencies": {
-    "axios": "^0.19.2",
+    "axios": "^0.21.1",
     "crypto": "^1.0.1",
     "fs": "0.0.1-security",
     "lodash": "^4.17.19",
