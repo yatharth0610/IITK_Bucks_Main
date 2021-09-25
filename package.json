@@ -12,7 +12,7 @@
     "axios": "^0.21.1",
     "crypto": "^1.0.1",
     "fs": "0.0.1-security",
-    "lodash": "^4.17.19",
+    "lodash": "^4.17.21",
     "nano-time": "^1.0.0",
     "path": "^0.12.7",
     "raw-body": "^2.4.1",
